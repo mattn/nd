@@ -4,6 +4,8 @@ Terminal-based music player for [Navidrome](https://www.navidrome.org/) (and oth
 
 ![](https://img.shields.io/badge/Go-1.26+-blue)
 
+<img width="946" height="370" alt="image" src="https://github.com/user-attachments/assets/20c03f88-8324-482f-9833-c6e26d69929e" />
+
 ## Features
 
 - Browse artists, albums, and songs
