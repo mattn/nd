@@ -91,10 +91,11 @@ The config file is `nd/config.json` in your OS config directory:
 | Kind | Themes |
 |------|--------|
 | Dark | `dracula`, `nord`, `gruvbox`, `catppuccin` |
+| Colored | `red`, `blue`, `navy`, `purple`, `green` |
 | Light | `github-light`, `solarized-light`, `gruvbox-light`, `catppuccin-latte` |
 | Terminal background | `default`, `mono` |
 
-Dark and light themes paint their own background. `default` and `mono` keep your terminal's background.
+Dark, colored, and light themes paint their own background. `default` and `mono` keep your terminal's background.
 
 Run `nd -list-themes` to preview them, and `nd -theme nord` to try one without changing your config. With `-theme`, `colors` overrides from the config are ignored so you see the theme as is.
 
