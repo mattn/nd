@@ -17,7 +17,8 @@ type Config struct {
 	MPV      string  `json:"mpv,omitempty"`
 	Theme    string  `json:"theme,omitempty"`
 	Colors   *Colors `json:"colors,omitempty"`
-	Cover    *bool   `json:"cover,omitempty"` // show cover art with sixel; default true
+	Cover    *bool   `json:"cover,omitempty"`    // show cover art with sixel; default true
+	Scrobble *bool   `json:"scrobble,omitempty"` // record plays on the server; default true
 }
 
 func configPath() string {
@@ -127,7 +128,9 @@ func main() {
 		cover = detectCover()
 	}
 
-	m := newModel(client, player, cover)
+	scrobble := cfg.Scrobble == nil || *cfg.Scrobble
+
+	m := newModel(client, player, cover, scrobble)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

@@ -77,6 +77,11 @@ type subsonicResponse struct {
 		Playlists     *playlists     `json:"playlists"`
 		Playlist      *playlist      `json:"playlist"`
 		LyricsList    *lyricsList    `json:"lyricsList"`
+		ArtistInfo2   *ArtistInfo    `json:"artistInfo2"`
+		AlbumInfo     *AlbumInfo     `json:"albumInfo"`
+		AlbumList2    *albumList     `json:"albumList2"`
+		RandomSongs   *songList      `json:"randomSongs"`
+		Starred2      *searchResult  `json:"starred2"`
 	} `json:"subsonic-response"`
 }
 
@@ -124,26 +129,47 @@ type Artist struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	AlbumCount int    `json:"albumCount"`
+	CoverArt   string `json:"coverArt"`
+	Starred    string `json:"starred"`
+	UserRating int    `json:"userRating"`
 }
 
 type Album struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Artist    string `json:"artist"`
-	ArtistID  string `json:"artistId"`
-	SongCount int    `json:"songCount"`
-	Year      int    `json:"year"`
-	CoverArt  string `json:"coverArt"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Artist     string `json:"artist"`
+	ArtistID   string `json:"artistId"`
+	SongCount  int    `json:"songCount"`
+	Year       int    `json:"year"`
+	CoverArt   string `json:"coverArt"`
+	Genre      string `json:"genre"`
+	Duration   int    `json:"duration"`
+	PlayCount  int    `json:"playCount"`
+	Created    string `json:"created"`
+	Starred    string `json:"starred"`
+	UserRating int    `json:"userRating"`
 }
 
 type Song struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Album    string `json:"album"`
-	Artist   string `json:"artist"`
-	Duration int    `json:"duration"`
-	Track    int    `json:"track"`
-	CoverArt string `json:"coverArt"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Album      string `json:"album"`
+	Artist     string `json:"artist"`
+	Duration   int    `json:"duration"`
+	Track      int    `json:"track"`
+	CoverArt   string `json:"coverArt"`
+	AlbumID    string `json:"albumId"`
+	ArtistID   string `json:"artistId"`
+	Disc       int    `json:"discNumber"`
+	Year       int    `json:"year"`
+	Genre      string `json:"genre"`
+	Suffix     string `json:"suffix"`
+	BitRate    int    `json:"bitRate"`
+	Size       int64  `json:"size"`
+	Path       string `json:"path"`
+	PlayCount  int    `json:"playCount"`
+	Starred    string `json:"starred"`
+	UserRating int    `json:"userRating"`
 }
 
 type Playlist struct {

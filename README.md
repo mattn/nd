@@ -12,6 +12,11 @@ Terminal-based music player for [Navidrome](https://www.navidrome.org/) (and oth
 - Playlist support
 - Incremental search for songs
 - Lyrics display (synced/unsynced)
+- Details of artists (biography, similar artists), albums, and songs (format, bitrate, play count...)
+- Browse recently added, recently played, most played, top rated, random, and starred albums
+- Random play
+- Star and rate artists, albums, and songs
+- Scrobbling: plays are recorded on the server (and forwarded to Last.fm / ListenBrainz if configured in Navidrome)
 - Queue with auto-advance to next track
 - Cover art display on sixel-capable terminals
 - Color themes (dark and light built-ins, fully customizable)
@@ -65,7 +70,8 @@ The config file is `nd/config.json` in your OS config directory:
   "colors": {
     "cursor": "#ffb86c"
   },
-  "cover": true
+  "cover": true,
+  "scrobble": true
 }
 ```
 
@@ -78,6 +84,7 @@ The config file is `nd/config.json` in your OS config directory:
 | `theme` | Built-in color theme. Defaults to `default` |
 | `colors` | Per-element color overrides on top of `theme` |
 | `cover` | Show cover art on sixel-capable terminals. Defaults to `true` |
+| `scrobble` | Record plays on the server. Defaults to `true` |
 
 ### Color Themes
 
@@ -126,7 +133,19 @@ On terminals that support [sixel](https://en.wikipedia.org/wiki/Sixel) graphics 
 | `L` | Show lyrics |
 | `p` | Playlists |
 | `a` | Artists |
+| `b` | Browse (recently added, most played, random, starred...) |
+| `r` | Play random songs |
+| `i` | Show details of the selected item |
+| `f` | Star / unstar the selected item |
+| `1`-`5` / `0` | Rate / clear rating of the selected item |
+| `?` | Show help |
 | `q` | Quit |
+
+`i`, `f`, and rating keys act on the item under the cursor, or on the now playing song in views without one. In the artist details, select a similar artist to open it.
+
+### Scrobbling
+
+When a song starts, it is reported to the server as now playing. It is recorded as played once it has played for half its length or 4 minutes, whichever comes first (the Last.fm rule). This updates play counts and "recently played" in Navidrome, and is forwarded to Last.fm or ListenBrainz if you have linked them in Navidrome. Set `"scrobble": false` to turn it off.
 
 While searching, results update as you type:
 

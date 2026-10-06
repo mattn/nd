@@ -73,9 +73,13 @@ func (m model) coverID() string {
 		if m.cursor < len(m.albums) {
 			return m.albums[m.cursor].CoverArt
 		}
-	case viewSongs, viewPlaylistSongs, viewSearch:
+	case viewSongs, viewPlaylistSongs, viewSearch, viewListSongs:
 		if m.cursor < len(m.songs) {
 			return m.songs[m.cursor].CoverArt
+		}
+	case viewInfo:
+		if m.infoCover != "" {
+			return m.infoCover
 		}
 	}
 	if m.nowPlaying != nil {
