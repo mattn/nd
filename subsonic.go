@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strconv"
 )
 
 type SubsonicClient struct {
@@ -128,6 +133,7 @@ type Album struct {
 	ArtistID  string `json:"artistId"`
 	SongCount int    `json:"songCount"`
 	Year      int    `json:"year"`
+	CoverArt  string `json:"coverArt"`
 }
 
 type Song struct {
@@ -137,6 +143,7 @@ type Song struct {
 	Artist   string `json:"artist"`
 	Duration int    `json:"duration"`
 	Track    int    `json:"track"`
+	CoverArt string `json:"coverArt"`
 }
 
 type Playlist struct {
@@ -310,4 +317,17 @@ func (c *SubsonicClient) Ping() error {
 		return fmt.Errorf("unexpected status: %s", resp.SubsonicResponse.Status)
 	}
 	return nil
+}
+
+// CoverArt fetches the cover art image scaled by the server to size pixels.
+func (c *SubsonicClient) CoverArt(id string, size int) (image.Image, error) {
+	data, err := c.get("getCoverArt", url.Values{"id": {id}, "size": {strconv.Itoa(size)}})
+	if err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("cover art: %w", err)
+	}
+	return img, nil
 }

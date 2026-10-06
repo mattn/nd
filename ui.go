@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -50,6 +51,15 @@ type model struct {
 	// search
 	searchInput string
 	searching   bool
+	searchSeq   uint64 // incremented on each edit to debounce queries
+	searchQuery string // query whose results are currently wanted
+	searchPrev  searchState
+
+	// cover art
+	cover     coverConfig
+	covers    map[string]string // sixel data by coverKey; "" when unavailable
+	coverWant string            // coverKey of the cover that should be shown
+	coverSeq  uint64            // incremented on each change to debounce fetches
 
 	// lyrics
 	lyrics     []LyricLine
@@ -67,17 +77,29 @@ type albumsMsg struct{ albums []Album }
 type songsMsg struct{ songs []Song }
 type playlistsMsg struct{ playlists []Playlist }
 type playlistSongsMsg struct{ songs []Song }
+type searchState struct {
+	mode   viewMode
+	cursor int
+	offset int
+	songs  []Song
+}
+
+type searchTickMsg struct{ seq uint64 }
+
 type searchMsg struct {
+	query   string
 	artists []Artist
 	albums  []Album
 	songs   []Song
 }
 
-func newModel(client *SubsonicClient, player *Player) model {
+func newModel(client *SubsonicClient, player *Player, cover coverConfig) model {
 	return model{
 		client: client,
 		player: player,
 		mode:   viewArtists,
+		cover:  cover,
+		covers: map[string]string{},
 	}
 }
 
@@ -162,9 +184,9 @@ func (m model) doSearch(query string) tea.Cmd {
 			return errMsg{err}
 		}
 		if res == nil {
-			return searchMsg{}
+			return searchMsg{query: query}
 		}
-		return searchMsg{artists: res.Artist, albums: res.Album, songs: res.Song}
+		return searchMsg{query: query, artists: res.Artist, albums: res.Album, songs: res.Song}
 	}
 }
 
@@ -188,6 +210,9 @@ func (m model) listLen() int {
 
 func (m model) visibleLines() int {
 	h := m.height - 5 // header + now playing(2) + error + help
+	if m.searching {
+		h-- // search input line
+	}
 	if h < 1 {
 		h = 20
 	}
@@ -212,6 +237,11 @@ func (m *model) clampCursor() {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	nm, cmd := m.update(msg)
+	return nm.(model).syncCover(cmd)
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -257,6 +287,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = viewArtists
 		m.cursor = 0
 		m.offset = 0
+		if m.curArtist != nil {
+			for i, a := range m.artists {
+				if a.ID == m.curArtist.ID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		m.clampCursor()
 		return m, nil
 
 	case albumsMsg:
@@ -264,6 +303,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = viewAlbums
 		m.cursor = 0
 		m.offset = 0
+		if m.curAlbum != nil {
+			for i, a := range m.albums {
+				if a.ID == m.curAlbum.ID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		m.clampCursor()
 		return m, nil
 
 	case songsMsg:
@@ -278,6 +326,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = viewPlaylists
 		m.cursor = 0
 		m.offset = 0
+		if m.curPlaylist != nil {
+			for i, p := range m.playlists {
+				if p.ID == m.curPlaylist.ID {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		m.clampCursor()
 		return m, nil
 
 	case playlistSongsMsg:
@@ -287,7 +344,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.offset = 0
 		return m, nil
 
+	case coverTickMsg:
+		if msg.seq != m.coverSeq || m.coverWant == "" {
+			return m, nil
+		}
+		if _, ok := m.covers[m.coverWant]; ok {
+			return m, nil
+		}
+		return m, m.fetchCover(m.coverWant)
+
+	case coverMsg:
+		m.covers[msg.key] = msg.sixel
+		return m, nil
+
+	case searchTickMsg:
+		if msg.seq != m.searchSeq || m.searchInput == "" {
+			return m, nil
+		}
+		m.searchQuery = m.searchInput
+		return m, m.doSearch(m.searchQuery)
+
 	case searchMsg:
+		// Ignore results for queries that are no longer current
+		if msg.query != m.searchQuery {
+			return m, nil
+		}
 		m.songs = msg.songs
 		m.mode = viewSearch
 		m.cursor = 0
@@ -300,28 +381,63 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEscape:
+		// Cancel: restore the view shown before searching
 		m.searching = false
 		m.searchInput = ""
+		m.searchQuery = ""
+		m.searchSeq++
+		m.mode = m.searchPrev.mode
+		m.cursor = m.searchPrev.cursor
+		m.offset = m.searchPrev.offset
+		m.songs = m.searchPrev.songs
+		m.clampCursor()
 		return m, nil
 	case tea.KeyEnter:
+		// Confirm: leave input mode and let the user pick from the results
 		m.searching = false
-		q := m.searchInput
-		m.searchInput = ""
-		if q != "" {
-			return m, m.doSearch(q)
+		m.clampCursor()
+		if m.searchInput != "" && m.searchInput != m.searchQuery {
+			m.searchSeq++
+			m.searchQuery = m.searchInput
+			return m, m.doSearch(m.searchQuery)
 		}
+		return m, nil
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.cursor--
+		m.clampCursor()
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.cursor++
+		m.clampCursor()
 		return m, nil
 	case tea.KeyBackspace:
-		if len(m.searchInput) > 0 {
-			m.searchInput = m.searchInput[:len(m.searchInput)-1]
+		if r := []rune(m.searchInput); len(r) > 0 {
+			m.searchInput = string(r[:len(r)-1])
 		}
-		return m, nil
-	default:
-		if msg.Type == tea.KeyRunes {
-			m.searchInput += string(msg.Runes)
-		}
+		return m.searchChanged()
+	case tea.KeyRunes, tea.KeySpace:
+		m.searchInput += string(msg.Runes)
+		return m.searchChanged()
+	}
+	return m, nil
+}
+
+// searchChanged schedules a debounced search for the current input.
+func (m model) searchChanged() (tea.Model, tea.Cmd) {
+	m.searchSeq++
+	if m.searchInput == "" {
+		m.searchQuery = ""
+		m.mode = m.searchPrev.mode
+		m.cursor = m.searchPrev.cursor
+		m.offset = m.searchPrev.offset
+		m.songs = m.searchPrev.songs
+		m.clampCursor()
 		return m, nil
 	}
+	seq := m.searchSeq
+	return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return searchTickMsg{seq: seq}
+	})
 }
 
 func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -374,6 +490,11 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.searching = true
 		m.searchInput = ""
+		m.searchQuery = ""
+		if m.mode != viewSearch {
+			m.searchPrev = searchState{mode: m.mode, cursor: m.cursor, offset: m.offset, songs: m.songs}
+		}
+		m.clampCursor()
 		return m, nil
 
 	case "n":
@@ -509,14 +630,15 @@ func (m model) playPrev() (model, tea.Cmd) {
 	return m.startPlay(m.queue[m.queueIdx])
 }
 
+// Styles are set by applyTheme.
 var (
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	cursorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	normalStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	dimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	playingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	cursorStyle  lipgloss.Style
+	normalStyle  lipgloss.Style
+	dimStyle     lipgloss.Style
+	playingStyle lipgloss.Style
+	headerStyle  lipgloss.Style
+	helpStyle    lipgloss.Style
+	errorStyle   lipgloss.Style
 )
 
 func (m model) View() string {
@@ -547,7 +669,7 @@ func (m model) View() string {
 		}
 		b.WriteString(headerStyle.Render(fmt.Sprintf("  %s", name)))
 	case viewSearch:
-		b.WriteString(headerStyle.Render("  Search Results"))
+		b.WriteString(headerStyle.Render(fmt.Sprintf("  Search: %s", m.searchQuery)))
 	case viewLyrics:
 		title := ""
 		if m.nowPlaying != nil {
@@ -558,12 +680,13 @@ func (m model) View() string {
 	b.WriteString("\n")
 
 	if m.searching {
-		b.WriteString(fmt.Sprintf("  / %s_\n", m.searchInput))
+		b.WriteString(normalStyle.Render(fmt.Sprintf("  / %s_", m.searchInput)) + "\n")
 	}
 
 	// list
 	vis := m.visibleLines()
 	n := m.listLen()
+	rows := make([]string, 0, vis)
 	for i := m.offset; i < m.offset+vis && i < n; i++ {
 		prefix := "  "
 		style := normalStyle
@@ -587,7 +710,12 @@ func (m model) View() string {
 		case viewSongs, viewPlaylistSongs, viewSearch:
 			s := m.songs[i]
 			dur := fmt.Sprintf("%d:%02d", s.Duration/60, s.Duration%60)
-			line = fmt.Sprintf("%2d. %s  %s  %s", s.Track, s.Title, dimStyle.Render(s.Artist), dimStyle.Render(dur))
+			if i == m.cursor {
+				// Nested styles would reset the cursor background
+				line = fmt.Sprintf("%2d. %s  %s  %s", s.Track, s.Title, s.Artist, dur)
+			} else {
+				line = fmt.Sprintf("%2d. %s  %s  %s", s.Track, s.Title, dimStyle.Render(s.Artist), dimStyle.Render(dur))
+			}
 			if m.nowPlaying != nil && s.ID == m.nowPlaying.ID {
 				style = playingStyle
 			}
@@ -601,13 +729,12 @@ func (m model) View() string {
 				line = " "
 			}
 		}
-		b.WriteString(style.Render(prefix+line) + "\n")
+		rows = append(rows, style.Render(prefix+line))
 	}
-
-	// pad remaining lines
-	for i := n; i < m.offset+vis; i++ {
-		b.WriteString("\n")
+	for len(rows) < vis {
+		rows = append(rows, "")
 	}
+	b.WriteString(m.renderListWithCover(rows))
 
 	// now playing
 	b.WriteString("\n")
@@ -620,13 +747,12 @@ func (m model) View() string {
 
 	// error (always reserve one line to keep layout stable)
 	if m.err != nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(fmt.Sprintf("  Error: %v", m.err)))
+		b.WriteString(errorStyle.Render(fmt.Sprintf("  Error: %v", m.err)))
 	}
 	b.WriteString("\n")
 
 	// help
 	b.WriteString(helpStyle.Render("  j/k:move  enter/l:select  h/esc:back  space:play  n/N:next/prev  s:stop  /:search  L:lyrics  p:playlists  a:artists  q:quit"))
-	b.WriteString("\n")
 
-	return b.String()
+	return fillBackground(b.String(), m.width, screenSeq)
 }

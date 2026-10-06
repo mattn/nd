@@ -11,10 +11,13 @@ import (
 )
 
 type Config struct {
-	Server   string `json:"server"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	MPV      string `json:"mpv,omitempty"`
+	Server   string  `json:"server"`
+	User     string  `json:"user"`
+	Password string  `json:"password"`
+	MPV      string  `json:"mpv,omitempty"`
+	Theme    string  `json:"theme,omitempty"`
+	Colors   *Colors `json:"colors,omitempty"`
+	Cover    *bool   `json:"cover,omitempty"` // show cover art with sixel; default true
 }
 
 func configPath() string {
@@ -54,11 +57,18 @@ func main() {
 	user := flag.String("user", "", "Username")
 	password := flag.String("password", "", "Password")
 	mpv := flag.String("mpv", "", "Path to mpv binary")
+	theme := flag.String("theme", "", "Color theme for this session (not saved)")
+	listThemes := flag.Bool("list-themes", false, "List available color themes")
 	flag.Parse()
 
 	cfg, _ := loadConfig()
 	if cfg == nil {
 		cfg = &Config{}
+	}
+
+	if *listThemes {
+		printThemes(os.Stdout, cfg.Theme)
+		return
 	}
 
 	if *server != "" {
@@ -82,6 +92,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// -theme is temporary: use the theme as-is, without config overrides
+	var err error
+	if *theme != "" {
+		err = applyTheme(*theme, nil)
+	} else {
+		err = applyTheme(cfg.Theme, cfg.Colors)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid theme: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Save config for next time
 	_ = saveConfig(cfg)
 
@@ -100,7 +122,12 @@ func main() {
 	player := NewPlayer(mpvPath)
 	defer player.Cleanup()
 
-	m := newModel(client, player)
+	var cover coverConfig
+	if cfg.Cover == nil || *cfg.Cover {
+		cover = detectCover()
+	}
+
+	m := newModel(client, player, cover)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
